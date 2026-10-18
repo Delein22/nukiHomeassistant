@@ -2,6 +2,13 @@
 
 ## Better support for Nuki devices in Home Assistant
 
+### Attribution and modifications
+
+This repository is based on the original open-source project by **Konstantin (`kvj`)**:
+https://github.com/kvj/hass_nuki_ng
+
+The original copyright and MIT license are retained in `LICENSE`. This repository contains local modifications by **Delein22**, including Home Assistant API compatibility fixes and the `unlock_and_open` action.
+
 ### Features:
 * Supported modes:
   * Nuki Bridge-only, with automatic webhook registration
