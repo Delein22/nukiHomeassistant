@@ -25,6 +25,8 @@ _LOGGER = logging.getLogger(__name__)
 BRIDGE_DISCOVERY_API = "https://api.nuki.io/discover/bridges"
 BRIDGE_HOOK = "nuki_ng_bridge_hook"
 BRIDGE_TIMEOUT = 10
+UNLOCK_RETRY_ATTEMPTS = 3
+UNLOCK_RETRY_DELAY = 1.0
 
 LOCK_DEVICE_TYPES = (0, 3, 4, 5)
 OPENER_DEVICE_TYPES = (2,)
@@ -532,6 +534,33 @@ class NukiCoordinator(DataUpdateCoordinator):
 
         return False
 
+    async def _unlock_with_retries(self, dev_id: str) -> bool:
+        """Unlock the Smart Lock, retrying transient Bridge rejections."""
+        for attempt in range(1, UNLOCK_RETRY_ATTEMPTS + 1):
+            try:
+                if await self._action_single(dev_id, "unlock"):
+                    return True
+            except Exception as err:
+                if attempt == UNLOCK_RETRY_ATTEMPTS:
+                    raise
+                _LOGGER.warning(
+                    "Nuki unlock attempt %s/%s failed: %s",
+                    attempt,
+                    UNLOCK_RETRY_ATTEMPTS,
+                    err,
+                )
+
+            if attempt < UNLOCK_RETRY_ATTEMPTS:
+                _LOGGER.warning(
+                    "Nuki Bridge rejected unlock attempt %s/%s; retrying in %.1fs",
+                    attempt,
+                    UNLOCK_RETRY_ATTEMPTS,
+                    UNLOCK_RETRY_DELAY,
+                )
+                await asyncio.sleep(UNLOCK_RETRY_DELAY)
+
+        return False
+
     async def action(self, dev_id: str, action: str):
         if action == "unlock_and_open":
             if not self.is_lock(dev_id):
@@ -539,15 +568,18 @@ class NukiCoordinator(DataUpdateCoordinator):
                     "unlock_and_open is only supported for Nuki Smart Locks"
                 )
 
-            if not await self._action_single(dev_id, "unlock"):
-                raise HomeAssistantError("Nuki unlock action was not accepted")
+            if not await self._unlock_with_retries(dev_id):
+                raise HomeAssistantError(
+                    "Nuki unlock action was not accepted after retries"
+                )
 
             if not await self._wait_until_ready_to_open(dev_id):
                 raise HomeAssistantError(
                     "Nuki did not report an unlocked state before the open action"
                 )
 
-            await self._action_single(dev_id, "open")
+            if not await self._action_single(dev_id, "open"):
+                raise HomeAssistantError("Nuki open action was not accepted")
             return
 
         await self._action_single(dev_id, action)
